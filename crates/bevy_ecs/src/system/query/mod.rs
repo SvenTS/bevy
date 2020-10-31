@@ -3,8 +3,8 @@ mod query_set;
 pub use query_set::*;
 
 use bevy_hecs::{
-    ArchetypeComponent, Batch, BatchedIter, Component, ComponentError, Entity, Fetch, Mut,
-    Query as HecsQuery, QueryIter, ReadOnlyFetch, TypeAccess, World,
+    ArchetypeComponent, Batch, BatchedIter, Component, ComponentError, Entity, Fetch,
+    MissingComponent, Mut, Query as HecsQuery, QueryIter, ReadOnlyFetch, TypeAccess, World,
 };
 use bevy_tasks::ParallelIterator;
 use std::marker::PhantomData;
@@ -22,8 +22,17 @@ pub struct Query<'a, Q: HecsQuery> {
 pub enum QueryError {
     CannotReadArchetype,
     CannotWriteArchetype,
-    ComponentError(ComponentError),
+    MissingComponent(MissingComponent),
     NoSuchEntity,
+}
+
+impl From<ComponentError> for QueryError {
+    fn from(error: ComponentError) -> Self {
+        match error {
+            ComponentError::NoSuchEntity => QueryError::NoSuchEntity,
+            ComponentError::MissingComponent(message) => QueryError::MissingComponent(message),
+        }
+    }
 }
 
 impl<'a, Q: HecsQuery> Query<'a, Q> {
@@ -112,22 +121,22 @@ impl<'a, Q: HecsQuery> Query<'a, Q> {
     /// Gets a reference to the entity's component of the given type. This will fail if the entity does not have
     /// the given component type or if the given component type does not match this query.
     pub fn get_component<T: Component>(&self, entity: Entity) -> Result<&T, QueryError> {
-        if let Some(location) = self.world.get_entity_location(entity) {
-            if self
-                .component_access
-                .is_read_or_write(&ArchetypeComponent::new::<T>(location.archetype))
-            {
-                // SAFE: we have already checked that the entity/component matches our archetype access. and systems are scheduled to run with safe archetype access
-                unsafe {
-                    self.world
-                        .get_at_location_unchecked(location)
-                        .map_err(QueryError::ComponentError)
-                }
-            } else {
-                Err(QueryError::CannotReadArchetype)
+        let location = self
+            .world
+            .get_entity_location(entity)
+            .ok_or_else(|| QueryError::NoSuchEntity)?;
+        if self
+            .component_access
+            .is_read_or_write(&ArchetypeComponent::new::<T>(location.archetype))
+        {
+            // SAFE: we have already checked that the entity/component matches our archetype access. and systems are scheduled to run with safe archetype access
+            unsafe {
+                self.world
+                    .get_at_location_unchecked(location)
+                    .map_err(|err| QueryError::from(err))
             }
         } else {
-            Err(QueryError::ComponentError(ComponentError::NoSuchEntity))
+            Err(QueryError::CannotReadArchetype)
         }
     }
 
@@ -137,11 +146,10 @@ impl<'a, Q: HecsQuery> Query<'a, Q> {
         &mut self,
         entity: Entity,
     ) -> Result<Mut<'_, T>, QueryError> {
-        let location = match self.world.get_entity_location(entity) {
-            None => return Err(QueryError::ComponentError(ComponentError::NoSuchEntity)),
-            Some(location) => location,
-        };
-
+        let location = self
+            .world
+            .get_entity_location(entity)
+            .ok_or_else(|| QueryError::NoSuchEntity)?;
         if self
             .component_access
             .is_write(&ArchetypeComponent::new::<T>(location.archetype))
@@ -150,7 +158,7 @@ impl<'a, Q: HecsQuery> Query<'a, Q> {
             unsafe {
                 self.world
                     .get_mut_at_location_unchecked(location)
-                    .map_err(QueryError::ComponentError)
+                    .map_err(|err| QueryError::from(err))
             }
         } else {
             Err(QueryError::CannotWriteArchetype)
@@ -167,7 +175,7 @@ impl<'a, Q: HecsQuery> Query<'a, Q> {
     ) -> Result<Mut<'_, T>, QueryError> {
         self.world
             .get_mut_unchecked(entity)
-            .map_err(QueryError::ComponentError)
+            .map_err(|err| QueryError::from(err))
     }
 
     pub fn removed<C: Component>(&self) -> &[Entity] {
