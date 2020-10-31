@@ -180,6 +180,10 @@ impl<'a, Q: HecsQuery> Query<'a, Q> {
         self.world.removed::<C>()
     }
 
+    pub fn contains(&self, entity: Entity) -> bool {
+        self.world.contains(entity)
+    }
+
     /// Sets the entity's component to the given value. This will fail if the entity does not already have
     /// the given component type or if the given component type does not match this query.
     pub fn set<T: Component>(&mut self, entity: Entity, component: T) -> Result<(), QueryError> {
