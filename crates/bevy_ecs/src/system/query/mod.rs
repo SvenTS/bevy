@@ -121,22 +121,21 @@ impl<'a, Q: HecsQuery> Query<'a, Q> {
     /// Gets a reference to the entity's component of the given type. This will fail if the entity does not have
     /// the given component type or if the given component type does not match this query.
     pub fn get_component<T: Component>(&self, entity: Entity) -> Result<&T, QueryError> {
-        let location = self
-            .world
-            .get_entity_location(entity)
-            .ok_or_else(|| QueryError::NoSuchEntity)?;
-        if self
-            .component_access
-            .is_read_or_write(&ArchetypeComponent::new::<T>(location.archetype))
-        {
+        match self.world.get_entity_location(entity) {
+            None => Err(QueryError::NoSuchEntity),
+            Some(location)
+                if !self
+                    .component_access
+                    .is_read_or_write(&ArchetypeComponent::new::<T>(location.archetype)) =>
+            {
+                Err(QueryError::CannotReadArchetype)
+            }
             // SAFE: we have already checked that the entity/component matches our archetype access. and systems are scheduled to run with safe archetype access
-            unsafe {
+            Some(location) => unsafe {
                 self.world
                     .get_at_location_unchecked(location)
                     .map_err(|err| QueryError::from(err))
-            }
-        } else {
-            Err(QueryError::CannotReadArchetype)
+            },
         }
     }
 
@@ -146,22 +145,21 @@ impl<'a, Q: HecsQuery> Query<'a, Q> {
         &mut self,
         entity: Entity,
     ) -> Result<Mut<'_, T>, QueryError> {
-        let location = self
-            .world
-            .get_entity_location(entity)
-            .ok_or_else(|| QueryError::NoSuchEntity)?;
-        if self
-            .component_access
-            .is_write(&ArchetypeComponent::new::<T>(location.archetype))
-        {
+        match self.world.get_entity_location(entity) {
+            None => Err(QueryError::NoSuchEntity),
+            Some(location)
+                if !self
+                    .component_access
+                    .is_write(&ArchetypeComponent::new::<T>(location.archetype)) =>
+            {
+                Err(QueryError::CannotWriteArchetype)
+            }
             // SAFE: RefMut does exclusivity checks and we have already validated the entity
-            unsafe {
+            Some(location) => unsafe {
                 self.world
                     .get_mut_at_location_unchecked(location)
                     .map_err(|err| QueryError::from(err))
-            }
-        } else {
-            Err(QueryError::CannotWriteArchetype)
+            },
         }
     }
 
